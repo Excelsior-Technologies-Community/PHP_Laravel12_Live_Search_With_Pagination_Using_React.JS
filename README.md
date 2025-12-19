@@ -896,7 +896,7 @@ Create resources/views/gallery.blade.php:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>React Repeater Form</title>
+    <title>React Live Search With Pagination</title>
 
     <!-- CSRF Token: Used for security in Laravel forms -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
