@@ -26,35 +26,26 @@ class GalleryController extends Controller
      */
     public function store(Request $request)
     {
-        // Validate required fields and image formats
-        $request->validate([
-            'title' => 'required',
-            'images.*' => 'image|mimes:jpg,jpeg,png'
-        ]);
-
-        // Array to store uploaded image paths
         $paths = [];
 
-        // Upload images if present
         if ($request->hasFile('images')) {
             foreach ($request->file('images') as $img) {
-                // Store image in storage/app/public/gallery
                 $paths[] = $img->store('gallery', 'public');
             }
         }
 
-        // Create new gallery record
-        Gallery::create([
+        $gallery = Gallery::create([
             'title' => $request->title,
             'description' => $request->description,
-            'images' => $paths,     // Stored as JSON
+            'images' => $paths,
             'status' => $request->status,
-            'created_by' => 1,      // Static user ID (can be replaced with auth user)
+            'created_by' => 1,
         ]);
 
-        // Redirect back with success message
-        return redirect()->back()->with('success', 'Gallery Created Successfully');
+        return response()->json($gallery);
     }
+
+
 
     /**
      * Fetch a single gallery record for editing.
@@ -75,38 +66,25 @@ class GalleryController extends Controller
      */
     public function update(Request $request, $id)
     {
-        // Find gallery by ID
         $gallery = Gallery::findOrFail($id);
 
-        // Validate form data
-        $request->validate([
-            'title' => 'required',
-            'images.*' => 'image|mimes:jpg,jpeg,png',
-        ]);
+        $images = $request->existing_images ?? [];
 
-        // Get existing images from hidden input
-        $paths = $request->input('existing_images', []);
-
-        // Upload and append new images
         if ($request->hasFile('images')) {
-            foreach ($request->file('images') as $img) {
-                $paths[] = $img->store('gallery', 'public');
+            foreach ($request->file('images') as $file) {
+                $images[] = $file->store('gallery', 'public');
             }
         }
 
-        // Update gallery record
         $gallery->update([
             'title' => $request->title,
             'description' => $request->description,
-            'images' => $paths,     // Updated image list
+            'images' => $images,
             'status' => $request->status,
-            'updated_by' => 1,      // Static user ID
         ]);
 
-        // Redirect back with success message
-        return redirect()->back()->with('success', 'Gallery Updated Successfully');
+        return response()->json($gallery);
     }
-
     /**
      * Delete a gallery record.
      * Used by React via fetch API.
