@@ -1,10 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import toast, { Toaster } from 'react-hot-toast';
 
-/**
- * GalleryForm Component
- * Handles CREATE and EDIT
- */
 function GalleryForm({ gallery, onBack }) {
     const [title, setTitle] = useState(gallery?.title ?? '');
     const [description, setDescription] = useState(gallery?.description ?? '');
@@ -27,16 +24,26 @@ function GalleryForm({ gallery, onBack }) {
         const formData = new FormData(e.target);
         const url = gallery ? `/gallery/${gallery.id}/update` : '/gallery/store';
 
-        const res = await fetch(url, {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-            }
-        });
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    'Accept': 'application/json'
+                }
+            });
 
-        const updatedGallery = await res.json();
-        onBack(updatedGallery);
+            if (res.ok) {
+                const updatedGallery = await res.json();
+                toast.success(gallery ? 'Gallery updated' : 'Gallery created');
+                onBack(updatedGallery);
+            } else {
+                toast.error('Error saving gallery');
+            }
+        } catch (error) {
+            toast.error('Server error');
+        }
     };
 
     return (
@@ -79,7 +86,7 @@ function GalleryForm({ gallery, onBack }) {
                 <div className="mb-3">
                     <label className="form-label">Images</label>
                     {images.map((imgObj, index) => (
-                        <div key={index} className="d-flex align-items-center mb-2">
+                        <div key={index} className="d-flex align-items-center mb-2 p-2 border rounded bg-light">
                             <input
                                 type="file"
                                 name="images[]"
@@ -87,18 +94,18 @@ function GalleryForm({ gallery, onBack }) {
                                 onChange={(e) => handleNewFileChange(e, index)}
                             />
                             {imgObj.type === 'existing' && (
-                                <img src={`/storage/${imgObj.value}`} width="50" className="ms-2 rounded" />
+                                <>
+                                    <img src={`/storage/${imgObj.value}`} width="50" height="50" className="ms-2 rounded object-fit-cover" />
+                                    <input type="hidden" name="existing_images[]" value={imgObj.value} />
+                                </>
                             )}
                             <button type="button" className="btn btn-danger ms-2" onClick={() => removeImage(index)}>Remove</button>
-                            {imgObj.type === 'existing' && (
-                                <input type="hidden" name="existing_images[]" value={imgObj.value} />
-                            )}
                         </div>
                     ))}
-                    <button type="button" className="btn btn-secondary" onClick={addImage}>+ Add Image</button>
+                    <button type="button" className="btn btn-secondary mt-2" onClick={addImage}>+ Add Image Row</button>
                 </div>
 
-                <div className="mb-3">
+                <div className="mb-4">
                     <label className="form-label" htmlFor="status">Status</label>
                     <select
                         id="status"
@@ -112,25 +119,44 @@ function GalleryForm({ gallery, onBack }) {
                     </select>
                 </div>
 
-                <button type="submit" className="btn btn-primary">{gallery ? 'Update' : 'Save'}</button>
+                <button type="submit" className="btn btn-primary w-100">{gallery ? 'Update Gallery' : 'Save Gallery'}</button>
             </form>
         </div>
     );
 }
 
-/**
- * GalleryIndex Component
- * Handles list, search, filter, sort, pagination, add, edit, delete
- */
 function GalleryIndex({ galleries }) {
     const [list, setList] = useState(galleries);
     const [search, setSearch] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
     const [sort, setSort] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [editingGallery, setEditingGallery] = useState(null);
     const [addingGallery, setAddingGallery] = useState(false);
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [lightboxImg, setLightboxImg] = useState(null);
     const perPage = 4;
+
+    useEffect(() => {
+        if (searchQuery.length > 1) {
+            setIsSearching(true);
+            const delayDebounceFn = setTimeout(() => {
+                fetch(`/gallery/live-search?query=${searchQuery}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        setSuggestions(data);
+                        setIsSearching(false);
+                    });
+            }, 300);
+            return () => clearTimeout(delayDebounceFn);
+        } else {
+            setSuggestions([]);
+            setIsSearching(false);
+        }
+    }, [searchQuery]);
 
     const filteredList = list
         .filter(g =>
@@ -146,25 +172,80 @@ function GalleryIndex({ galleries }) {
     const totalPages = Math.ceil(filteredList.length / perPage);
     const paginatedData = filteredList.slice((currentPage - 1) * perPage, currentPage * perPage);
 
-    const handleDelete = id => {
+    const handleDelete = async (id) => {
         if (!confirm('Are you sure to delete?')) return;
-        setList(list.filter(g => g.id !== id));
-        fetch(`/gallery/${id}/delete`, {
-            method: 'POST',
-            headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
-        });
+        try {
+            const res = await fetch(`/gallery/${id}/delete`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+            });
+            if (res.ok) {
+                setList(list.filter(g => g.id !== id));
+                toast.success('Deleted successfully');
+            }
+        } catch (error) {
+            toast.error('Failed to delete');
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (!confirm(`Delete ${selectedIds.length} selected items?`)) return;
+        try {
+            const res = await fetch('/gallery/bulk-delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: JSON.stringify({ ids: selectedIds })
+            });
+            if (res.ok) {
+                setList(list.filter(g => !selectedIds.includes(g.id)));
+                setSelectedIds([]);
+                toast.success('Bulk delete successful');
+            }
+        } catch (error) {
+            toast.error('Bulk action failed');
+        }
+    };
+
+    const handleStatusToggle = async (id) => {
+        try {
+            const res = await fetch(`/gallery/${id}/toggle`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setList(list.map(g => g.id === id ? { ...g, status: data.status } : g));
+                toast.success('Status updated');
+            }
+        } catch (error) {
+            toast.error('Status update failed');
+        }
+    };
+
+    const handleSelectRow = (id) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
     };
 
     const handleReset = () => {
         setSearch('');
+        setSearchQuery('');
         setSort('');
         setStatusFilter('');
         setCurrentPage(1);
+        setSelectedIds([]);
     };
 
     const handleBackFromForm = (updatedGallery) => {
         if (updatedGallery) {
-            setList(list.map(g => g.id === updatedGallery.id ? updatedGallery : g));
+            const exists = list.find(g => g.id === updatedGallery.id);
+            if (exists) {
+                setList(list.map(g => g.id === updatedGallery.id ? updatedGallery : g));
+            } else {
+                setList([updatedGallery, ...list]);
+            }
         }
         setAddingGallery(false);
         setEditingGallery(null);
@@ -175,14 +256,56 @@ function GalleryIndex({ galleries }) {
 
     return (
         <div className="card shadow-sm p-4">
-            <h2 className="mb-4">Gallery List</h2>
+            <Toaster position="top-right" />
+            <h2 className="mb-4">Gallery Management</h2>
+
+            <div className="row mb-4">
+                <div className="col-md-4 position-relative">
+                    <label className="form-label fw-bold small">Advance Search</label>
+                    <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Type to search..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    {isSearching && (
+                        <div className="spinner-border spinner-border-sm position-absolute" 
+                             style={{ right: '20px', top: '38px' }}></div>
+                    )}
+                    {suggestions.length > 0 && (
+                        <ul className="list-group position-absolute w-100 shadow-lg" style={{ zIndex: 1000, top: '70px' }}>
+                            {suggestions.map((item) => (
+                                <li 
+                                    key={item.id} 
+                                    className="list-group-item list-group-item-action d-flex align-items-center"
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => {
+                                        setSearch(item.title);
+                                        setSearchQuery(item.title);
+                                        setSuggestions([]);
+                                    }}
+                                >
+                                    {item.images && item.images[0] && (
+                                        <img src={`/storage/${item.images[0]}`} width="30" height="30" className="me-2 rounded" />
+                                    )}
+                                    <span className="small fw-bold">{item.title}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            </div>
 
             <div className="d-flex flex-wrap align-items-center mb-3 gap-2">
                 <button className="btn btn-primary" onClick={() => setAddingGallery(true)}>+ Add Gallery</button>
+                {selectedIds.length > 0 && (
+                    <button className="btn btn-danger" onClick={handleBulkDelete}>Delete Selected ({selectedIds.length})</button>
+                )}
 
                 <input
                     type="text"
-                    placeholder="Search by title..."
+                    placeholder="Filter by title..."
                     value={search}
                     onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
                     className="form-control"
@@ -204,54 +327,69 @@ function GalleryIndex({ galleries }) {
                 <button className="btn btn-outline-secondary" onClick={handleReset}>Reset</button>
             </div>
 
-            <div className="mb-3">
-                Total Galleries: <span className="badge bg-primary">{filteredList.length}</span>
-            </div>
-
             <div className="table-responsive">
                 <table className="table table-bordered align-middle">
-                    <thead className="table-light">
+                    <thead className="table-dark text-center">
                         <tr>
+                            <th>
+                                <input 
+                                    type="checkbox" 
+                                    onChange={e => setSelectedIds(e.target.checked ? paginatedData.map(g => g.id) : [])}
+                                    checked={selectedIds.length > 0 && paginatedData.every(g => selectedIds.includes(g.id))}
+                                />
+                            </th>
                             <th>Id</th>
                             <th>Title</th>
-                            <th>Description</th>
                             <th>Images</th>
                             <th>Status</th>
-                            <th width="160">Action</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         {paginatedData.length > 0 ? paginatedData.map(g => (
-                            <tr key={g.id}>
-                                <td>{g.id}</td>
-                                <td>{g.title}</td>
-                                <td>{g.description}</td>
+                            <tr key={g.id} className="text-center">
                                 <td>
-                                    {g.images?.map((img, i) => (
-                                        <img key={i} src={`/storage/${img}`} width="40" className="me-1 rounded" />
-                                    ))}
+                                    <input 
+                                        type="checkbox" 
+                                        checked={selectedIds.includes(g.id)} 
+                                        onChange={() => handleSelectRow(g.id)}
+                                    />
+                                </td>
+                                <td>{g.id}</td>
+                                <td className="text-start">{g.title}</td>
+                                <td>
+                                    <div className="d-flex justify-content-center flex-wrap gap-1">
+                                        {g.images?.map((img, i) => (
+                                            <img 
+                                                key={i} 
+                                                src={`/storage/${img}`} 
+                                                width="40" 
+                                                height="40" 
+                                                className="rounded border pointer shadow-sm object-fit-cover"
+                                                style={{ cursor: 'zoom-in' }}
+                                                onClick={() => setLightboxImg(`/storage/${img}`)}
+                                            />
+                                        ))}
+                                    </div>
                                 </td>
                                 <td>
-                                    <span className={`badge ${g.status ? 'bg-success' : 'bg-secondary'}`}>
-                                        {g.status ? 'Active' : 'Inactive'}
-                                    </span>
+                                    <div className="form-check form-switch d-flex justify-content-center">
+                                        <input 
+                                            className="form-check-input" 
+                                            type="checkbox" 
+                                            checked={parseInt(g.status) === 1} 
+                                            onChange={() => handleStatusToggle(g.id)}
+                                        />
+                                    </div>
                                 </td>
                                 <td>
                                     <button className="btn btn-sm btn-warning me-2" onClick={() => setEditingGallery(g)}>Edit</button>
-                                    <button
-                                        className="btn btn-sm btn-danger"
-                                        onClick={() => {
-                                            if (window.confirm('Are you sure you want to delete this gallery?')) {
-                                                handleDelete(g.id);
-                                            }
-                                        }}
-                                    >
-                                        Delete
-                                    </button>                                </td>
+                                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(g.id)}>Delete</button>
+                                </td>
                             </tr>
                         )) : (
                             <tr>
-                                <td colSpan="6" className="text-center">No records found</td>
+                                <td colSpan="6" className="text-center py-4">No records found</td>
                             </tr>
                         )}
                     </tbody>
@@ -260,14 +398,23 @@ function GalleryIndex({ galleries }) {
 
             <div className="d-flex justify-content-between align-items-center mt-3">
                 <button className="btn btn-outline-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(currentPage - 1)}>← Previous</button>
-                <span>Page {currentPage} of {totalPages}</span>
-                <button className="btn btn-outline-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(currentPage + 1)}>Next →</button>
+                <span className="fw-bold text-muted">Page {currentPage} of {totalPages || 1}</span>
+                <button className="btn btn-outline-secondary" disabled={currentPage === totalPages || totalPages === 0} onClick={() => setCurrentPage(currentPage + 1)}>Next →</button>
             </div>
+
+            {lightboxImg && (
+                <div 
+                    className="position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center bg-dark bg-opacity-75" 
+                    style={{ zIndex: 9999, cursor: 'zoom-out' }} 
+                    onClick={() => setLightboxImg(null)}
+                >
+                    <img src={lightboxImg} className="mw-100 mh-100 rounded shadow-lg border border-3 border-white" />
+                </div>
+            )}
         </div>
     );
 }
 
-// Render App
 createRoot(document.getElementById('app')).render(
-    <GalleryIndex galleries={window.galleriesData} />
+    <GalleryIndex galleries={window.galleriesData || []} />
 );
