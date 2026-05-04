@@ -7,23 +7,12 @@ use Illuminate\Http\Request;
 
 class GalleryController extends Controller
 {
-    /**
-     * Display all gallery records.
-     * Data is passed to Blade, and React consumes it via window.galleriesData.
-     */
     public function index()
     {
-        // Fetch all galleries ordered by ID in ascending order
-        $galleries = Gallery::orderBy('id', 'asc')->get();
-
-        // Pass galleries data to Blade view
+        $galleries = Gallery::orderBy('id', 'desc')->get();
         return view('gallery', compact('galleries'));
     }
 
-    /**
-     * Store a new gallery record.
-     * Handles form validation and multiple image uploads.
-     */
     public function store(Request $request)
     {
         $paths = [];
@@ -45,25 +34,12 @@ class GalleryController extends Controller
         return response()->json($gallery);
     }
 
-
-
-    /**
-     * Fetch a single gallery record for editing.
-     * Returns JSON response used by React.
-     */
     public function edit($id)
     {
-        // Find gallery by ID or throw 404 error
         $gallery = Gallery::findOrFail($id);
-
-        // Return gallery data as JSON for React editing
         return response()->json($gallery);
     }
 
-    /**
-     * Update an existing gallery record.
-     * Keeps existing images and appends new uploaded images.
-     */
     public function update(Request $request, $id)
     {
         $gallery = Gallery::findOrFail($id);
@@ -85,19 +61,39 @@ class GalleryController extends Controller
 
         return response()->json($gallery);
     }
-    /**
-     * Delete a gallery record.
-     * Used by React via fetch API.
-     */
+
+    public function toggleStatus($id)
+    {
+        $gallery = Gallery::findOrFail($id);
+        $gallery->update(['status' => !$gallery->status]);
+
+        return response()->json(['success' => true, 'status' => $gallery->status]);
+    }
+
     public function destroy($id)
     {
-        // Find gallery by ID
         $gallery = Gallery::findOrFail($id);
+        $gallery->delete();
 
-        // Soft delete the gallery record
-        $gallery->delete(); // Can also use status=0 if needed
-
-        // Return JSON response for React
         return response()->json(['success' => true]);
+    }
+
+    public function bulkDelete(Request $request)
+    {
+        Gallery::whereIn('id', $request->ids)->delete();
+
+        return response()->json(['success' => true]);
+    }
+
+    public function search(Request $request)
+    {
+        $query = $request->get('query');
+
+        $results = Gallery::where('title', 'LIKE', "%{$query}%")
+            ->orWhere('description', 'LIKE', "%{$query}%")
+            ->limit(10)
+            ->get();
+
+        return response()->json($results);
     }
 }
